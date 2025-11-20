@@ -1,0 +1,7 @@
+
+// TODO: Build a rag corpus
+{"id": "star_ziwei", "type": "star_definition", "text": "紫微星：主權威、核心、自尊，落在命宮時…"}
+{"id": "star_tianfu", "type": "star_definition", "text": "天府星：主穩定、資源、財庫，落在財帛宮時…"}
+{"id": "rule_career", "type": "rule", "text": "官祿宮為事業主宮，需同時參考遷移宮與福德宮…"}
+{"id": "example_case_001", "type": "example", "text": "案例：命宮無主星，官祿宮天同太陰…解讀示範如下：…"}
+...
