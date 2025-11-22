@@ -7,14 +7,12 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
 
 def load_prompt_template():
-    prompt_path = Path(__file__).parent / "prompts" / "interpretation_prompt_advanced_zh.txt"
+    prompt_path = Path(__file__).parent / 'data_generation' / "prompts" / "interpretation_prompt_advanced_zh.txt"
     return prompt_path.read_text(encoding="utf-8")
-
 
 def build_prompt(template, chart_json):
     chart_str = json.dumps(chart_json, ensure_ascii=False)
     return template.replace("{{CHART_JSON}}", chart_str)
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -53,7 +51,7 @@ def main():
         print(f"[Stage 2] Processing batch {idx}: {input_file}")
 
         with open(input_file, encoding="utf-8") as fin, \
-             open(output_file, "w", encoding="utf-8") as fout:
+            open(output_file, "w", encoding="utf-8") as fout:
 
             for line in fin:
                 record = json.loads(line)
