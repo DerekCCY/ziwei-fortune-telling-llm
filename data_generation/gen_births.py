@@ -8,7 +8,7 @@ from pathlib import Path
 import configs
 
 
-def random_birth_date(start_year=1975, end_year=2025):
+def random_birth_date(start_year=1965, end_year=2001):
     """Generate random birth date"""
     start = date(start_year, 1, 1)
     end = date(end_year, 12, 31)
@@ -29,7 +29,7 @@ def random_birth_record():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--count", type=int, default=1000)
-    parser.add_argument("--batches", type=int, default=1)
+    parser.add_argument("--batches", type=int, default=2)
     args = parser.parse_args()
 
     configs.BIRTHS_DIR.mkdir(parents=True, exist_ok=True)

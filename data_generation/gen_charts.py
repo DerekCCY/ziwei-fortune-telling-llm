@@ -50,7 +50,7 @@ def convert_chart(birth_date, hour_index, gender):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batches", type=int, default=1)
+    parser.add_argument("--batches", type=int, default=2)
     args = parser.parse_args()
 
     configs.CHARTS_DIR.mkdir(parents=True, exist_ok=True)
