@@ -6,7 +6,7 @@ from pathlib import Path
 # ============================================================================
 
 # Base directories
-PROJECT_ROOT = Path(__file__).parent.parent
+PROJECT_ROOT = Path(__file__).parent
 DATA_PATH = PROJECT_ROOT / 'data'
 DATA_PATH.mkdir(exist_ok=True) 
 
@@ -14,7 +14,7 @@ DATA_PATH.mkdir(exist_ok=True)
 BIRTHS_DIR = DATA_PATH / 'births'
 CHARTS_DIR = DATA_PATH / 'charts'
 
-BATCH_FILENAME = "batch_{:04d}.jsonl"
+BATCH_FILENAME = "batch_0004.jsonl"
 BIRTH_PATH = BIRTHS_DIR / BATCH_FILENAME
 CHART_PATH = CHARTS_DIR / BATCH_FILENAME
 

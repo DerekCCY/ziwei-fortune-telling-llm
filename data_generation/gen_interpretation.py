@@ -1,12 +1,14 @@
 import json
 import argparse
 from pathlib import Path
-import configs
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 import re
 from tqdm.auto import tqdm 
+import sys
+sys.path.append('/home/ec2-user/ziwei-fortune-telling-llm')
 import time
+import configs
 def load_prompt_template():
     prompt_path = Path(__file__).parent / "prompts" / "interpretation_prompt_advanced_zh.txt"
     return prompt_path.read_text(encoding="utf-8")
@@ -52,8 +54,8 @@ def main():
     template = load_prompt_template()
 
     for idx in range(1, args.batches + 1):
-        input_file = configs.CHARTS_DIR / configs.BATCH_FILENAME.format(idx)
-        output_file = output_dir / configs.BATCH_FILENAME.format(idx)
+        input_file = configs.CHARTS_DIR / configs.BATCH_FILENAME
+        output_file = output_dir / configs.BATCH_FILENAME
 
         print(f"[Stage 2] Processing batch {idx}: {input_file}")
 
