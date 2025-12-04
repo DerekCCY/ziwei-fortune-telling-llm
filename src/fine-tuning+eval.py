@@ -57,7 +57,24 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Fine-tune Qwen on Ziwei Doushu tasks")
     
     # Data Arguments
-    parser.add_argument("--data_path", type=str, default="/home/ec2-user/ziwei-fortune-telling-llm/data/interpretations/merged/input.jsonl", help="Path to the training data JSONL file")
+    parser.add_argument(
+        "--train_path",
+        type=str,
+        default="./data/final_data/train.jsonl",
+        help="Path to the training data JSONL file"
+    )
+    parser.add_argument(
+        "--val_path",
+        type=str,
+        default="./data/final_data/val.jsonl",
+        help="Path to the validation data JSONL file (optional)"
+    )
+    parser.add_argument(
+        "--test_path",
+        type=str,
+        default="./data/final_data/test.jsonl",
+        help="Path to the test data JSONL file (optional)"
+    )
 
     # Model Arguments
     parser.add_argument("--model_size", type=str, default="4b", choices=["0.5b", "4b"], help="Model size to use (8b or 4b)")
@@ -75,20 +92,6 @@ def parse_args():
         type=int,
         default=1,
         help="Run validation every N epochs (if validation set exists).",
-    )
-
-    # Validation / Test split
-    parser.add_argument(
-        "--val_ratio",
-        type=float,
-        default=0.1,
-        help="Fraction of data used for validation (e.g., 0.1 = 10%)",
-    )
-    parser.add_argument(
-        "--test_ratio",
-        type=float,
-        default=0.1,
-        help="Fraction of data used for testing (e.g., 0.1 = 10%)",
     )
 
     # Scheduler Hyperparameters
@@ -281,47 +284,84 @@ def main():
         f"run-{args.model_size}-lr{args.learning_rate}-bs{args.batch_size}-{timestamp}"
     )
 
-    # --------------------------------------------------------------------
-    # Load Data
-    # --------------------------------------------------------------------
-    print(f"Loading data from: {args.data_path}")
-    if not os.path.exists(args.data_path):
-        raise FileNotFoundError(f"Data file not found at {args.data_path}")
+    # # --------------------------------------------------------------------
+    # # Load Data
+    # # --------------------------------------------------------------------
+    # print(f"Loading data from: {args.data_path}")
+    # if not os.path.exists(args.data_path):
+    #     raise FileNotFoundError(f"Data file not found at {args.data_path}")
 
-    raw_dataset = load_dataset("json", data_files=args.data_path, split="train")
-    print(f"Loaded {len(raw_dataset)} samples.")
-    print(f"Sample keys found: {list(raw_dataset[0].keys())}")
+    # raw_dataset = load_dataset("json", data_files=args.data_path, split="train")
+    # print(f"Loaded {len(raw_dataset)} samples.")
+    # print(f"Sample keys found: {list(raw_dataset[0].keys())}")
+
+    # # --------------------------------------------------------------------
+    # # Split into train / val / test
+    # # --------------------------------------------------------------------
+    # test_ratio = max(0.0, min(args.test_ratio, 0.5)) # ensure not over 50%
+    # val_ratio = max(0.0, min(args.val_ratio, 0.5)) # ensure not over 50%
+
+    # if test_ratio > 0:
+    #     dataset_dict = raw_dataset.train_test_split(test_size=test_ratio, seed=42)
+    #     train_val_raw = dataset_dict["train"]
+    #     test_raw = dataset_dict["test"]
+    # else:
+    #     train_val_raw = raw_dataset
+    #     test_raw = None
+
+    # if val_ratio > 0:
+    #     # val_ratio 是相對 whole dataset，要換算成相對 train_val 的比例
+    #     if test_ratio < 1.0:
+    #         val_in_train_val = val_ratio / (1.0 - test_ratio)
+    #     else:
+    #         val_in_train_val = 0.0
+    #     if val_in_train_val > 0:
+    #         tv_split = train_val_raw.train_test_split(test_size=val_in_train_val, seed=42)
+    #         train_raw = tv_split["train"]
+    #         val_raw = tv_split["test"]
+    #     else:
+    #         train_raw = train_val_raw
+    #         val_raw = None
+    # else:
+    #     train_raw = train_val_raw
+    #     val_raw = None
+
+    # print(f"Train size: {len(train_raw)}")
+    # print(f"Val size:   {len(val_raw) if val_raw is not None else 0}")
+    # print(f"Test size:  {len(test_raw) if test_raw is not None else 0}")
 
     # --------------------------------------------------------------------
-    # Split into train / val / test
+    # Load Data: train / val / test from three JSONL files
     # --------------------------------------------------------------------
-    test_ratio = max(0.0, min(args.test_ratio, 0.5)) # ensure not over 50%
-    val_ratio = max(0.0, min(args.val_ratio, 0.5)) # ensure not over 50%
+    print(f"Loading train data from: {args.train_path}")
+    if not os.path.exists(args.train_path):
+        raise FileNotFoundError(f"Train data file not found at {args.train_path}")
 
-    if test_ratio > 0:
-        dataset_dict = raw_dataset.train_test_split(test_size=test_ratio, seed=42)
-        train_val_raw = dataset_dict["train"]
-        test_raw = dataset_dict["test"]
+    train_raw = load_dataset("json", data_files=args.train_path, split="train")
+    print(f"Loaded {len(train_raw)} train samples.")
+    print(f"Sample keys found: {list(train_raw[0].keys())}")
+
+    # Validation set (optional but recommended)
+    if args.val_path is not None:
+        print(f"Loading validation data from: {args.val_path}")
+        if not os.path.exists(args.val_path):
+            raise FileNotFoundError(f"Validation data file not found at {args.val_path}")
+        val_raw = load_dataset("json", data_files=args.val_path, split="train")
+        print(f"Loaded {len(val_raw)} validation samples.")
     else:
-        train_val_raw = raw_dataset
-        test_raw = None
-
-    if val_ratio > 0:
-        # val_ratio 是相對 whole dataset，要換算成相對 train_val 的比例
-        if test_ratio < 1.0:
-            val_in_train_val = val_ratio / (1.0 - test_ratio)
-        else:
-            val_in_train_val = 0.0
-        if val_in_train_val > 0:
-            tv_split = train_val_raw.train_test_split(test_size=val_in_train_val, seed=42)
-            train_raw = tv_split["train"]
-            val_raw = tv_split["test"]
-        else:
-            train_raw = train_val_raw
-            val_raw = None
-    else:
-        train_raw = train_val_raw
         val_raw = None
+        print("No validation file provided. val_raw = None")
+
+    # Test set (optional)
+    if args.test_path is not None:
+        print(f"Loading test data from: {args.test_path}")
+        if not os.path.exists(args.test_path):
+            raise FileNotFoundError(f"Test data file not found at {args.test_path}")
+        test_raw = load_dataset("json", data_files=args.test_path, split="train")
+        print(f"Loaded {len(test_raw)} test samples.")
+    else:
+        test_raw = None
+        print("No test file provided. test_raw = None")
 
     print(f"Train size: {len(train_raw)}")
     print(f"Val size:   {len(val_raw) if val_raw is not None else 0}")
