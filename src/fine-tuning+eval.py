@@ -437,7 +437,10 @@ def main():
         # 如果 prompt_len >= max_seq_length，這筆資料就廢了
         
         tokenized["labels"] = labels
-        # print(labels)
+        # print(len(labels))
+        # if all(l == -100 for l in labels):
+        #     # print("Warning: All labels are -100 after processing. Check prompt construction and tokenization.")
+        #     raise ValueError("All labels are -100 after processing. Check prompt construction and tokenization.")
         return tokenized
 
     print("Tokenizing and preparing dataset (this may take a while)...")
@@ -445,6 +448,14 @@ def main():
         preprocess_function,
         remove_columns=train_raw.column_names,
     )
+    # 🔍 這裡加 debug，看 label 到底長怎樣
+    print("=== DEBUG: check labels of first train sample ===")
+    sample = train_dataset[0]
+    labels = sample["labels"]
+    print("Unique label values:", set(labels))
+    print("Number of tokens with label != -100:",
+          sum(1 for x in labels if x != -100))
+    print(sample["attention_mask"])
 
     val_dataset = None
     if val_raw is not None:
