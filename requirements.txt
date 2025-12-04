@@ -1,7 +1,10 @@
-datasets==4.4.1
-numpy
-py_iztro==0.1.5
-scripts==3.0
-sentence_transformers==5.1.2
-tqdm==4.67.1
-transformers==4.57.1
+torch
+transformers
+datasets
+pandas
+wandb
+peft
+accelerate
+bitsandbytes
+trl
+jsonlines

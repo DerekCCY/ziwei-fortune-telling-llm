@@ -492,6 +492,37 @@ def main():
         #     raise ValueError("All labels are -100 after processing. Check prompt construction and tokenization.")
         return tokenized
 
+    def compute_seq_len(example):
+        text = build_prompt(example)
+        # 不要 truncation / padding，保留完整長度
+        tokens = tokenizer(
+            text,
+            add_special_tokens=True,
+            truncation=False,
+            padding=False,
+        )
+        return {"seq_len": len(tokens["input_ids"])}
+
+    print("Computing sequence length stats on train_raw...")
+    train_with_len = train_raw.map(compute_seq_len)
+
+    lengths = train_with_len["seq_len"]
+    print("Number of samples:", len(lengths))
+    print("Min length:", min(lengths))
+    print("Max length:", max(lengths))
+
+    # 簡單算幾個分位數
+    sorted_len = sorted(lengths)
+    def pct(p):
+        idx = int(len(sorted_len) * p)
+        idx = min(max(idx, 0), len(sorted_len) - 1)
+        return sorted_len[idx]
+
+    print("P50 (median):", pct(0.5))
+    print("P90:", pct(0.9))
+    print("P95:", pct(0.95))
+    print("P99:", pct(0.99))
+
     print("Tokenizing and preparing dataset (this may take a while)...")
     train_dataset = train_raw.map(
         preprocess_function,
