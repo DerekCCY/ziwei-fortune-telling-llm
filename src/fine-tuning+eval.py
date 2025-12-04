@@ -18,8 +18,8 @@ from transformers import (
 )
 from transformers.trainer_utils import get_last_checkpoint
 from peft import LoraConfig, PeftModel, prepare_model_for_kbit_training, get_peft_model
-from trl import SFTTrainer
-
+# from trl import SFTTrainer
+from transformers import Trainer
 # Try importing SFTConfig
 try:
     from trl import SFTConfig
@@ -364,6 +364,15 @@ def main():
         target_modules=["q_proj","k_proj","v_proj", # attention modules
             "o_proj","gate_proj","up_proj","down_proj",],) # Feed-Forward modules
 
+    from peft import get_peft_model, prepare_model_for_kbit_training
+
+    # 4bit 量化的標準步驟
+    model = prepare_model_for_kbit_training(model)
+
+    # 掛上 LoRA
+    model = get_peft_model(model, peft_config)
+    model.print_trainable_parameters()
+
     # --------------------------------------------------------------------
     # Preprocess dataset: tokenize + mask input labels
     # --------------------------------------------------------------------
@@ -448,14 +457,17 @@ def main():
         preprocess_function,
         remove_columns=train_raw.column_names,
     )
-    # 🔍 這裡加 debug，看 label 到底長怎樣
-    print("=== DEBUG: check labels of first train sample ===")
-    sample = train_dataset[0]
-    labels = sample["labels"]
-    print("Unique label values:", set(labels))
-    print("Number of tokens with label != -100:",
-          sum(1 for x in labels if x != -100))
-    print(sample["attention_mask"])
+    # # 🔍 這裡加 debug，看 label 到底長怎樣
+    # print("=== DEBUG: check labels of first train sample ===")
+    # sample = train_dataset[0]
+    # input_ids = torch.tensor([sample["input_ids"]]).to(model.device)
+    # attention_mask = torch.tensor([sample["attention_mask"]]).to(model.device)
+    # labels = torch.tensor([sample["labels"]]).to(model.device)
+
+    # with torch.no_grad():
+    #     out = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+
+    # print("manual forward loss =", out.loss.item())
 
     val_dataset = None
     if val_raw is not None:
@@ -548,6 +560,8 @@ def main():
             print(f"[WandB] Failed to save wandb_meta.json: {e}")
 
     training_args = TrainingArguments(**common_args)
+    from transformers import default_data_collator
+    data_collator = default_data_collator
 
     # --------------------------------------------------------------------
     # Initialize SFTTrainer
@@ -557,15 +571,25 @@ def main():
         print("GPU count:", torch.cuda.device_count())
         print("Current GPU:", torch.cuda.current_device(), torch.cuda.get_device_name())
 
-    print("Initializing SFTTrainer...")
-    trainer = SFTTrainer(
+    # print("Initializing SFTTrainer...")
+    # trainer = SFTTrainer(
+    #     model=model,
+    #     args=training_args,
+    #     train_dataset=train_dataset,
+    #     eval_dataset=val_dataset,   # 可以是 None，Trainer 會自己處理
+    #     peft_config=peft_config,
+    # )
+    # print("Trainer / accelerator device:", trainer.accelerator.device)
+    print("Initializing vanilla Trainer with PEFT model...")
+    trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        eval_dataset=val_dataset,   # 可以是 None，Trainer 會自己處理
-        peft_config=peft_config,
+        eval_dataset=val_dataset,
+        data_collator=data_collator,
     )
-    print("Trainer / accelerator device:", trainer.accelerator.device)
+
+    print("Trainer device:", trainer.args.device)
 
     # --------------------------------------------------------------------
     # Attach BestModelCallback：每 N 個 epoch 做一次 validation 並存最佳模型
@@ -622,6 +646,7 @@ def main():
 
     print(f"Starting training for {args.num_epochs} epochs...")
     trainer.train(resume_from_checkpoint=resume_checkpoint)
+
 
     # --------------------------------------------------------------------
     # Validation summary（已經在訓練過程中自動 log 到 WandB）
