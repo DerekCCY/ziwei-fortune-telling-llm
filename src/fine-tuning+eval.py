@@ -153,11 +153,11 @@ def build_prompt(sample):
         f"性別: {gender}\n"
         f"時辰_index: {time_index}\n"
         "</INPUT>\n"
-        "<Question>\n"
-        "請根據上述出生資料，先自行排出完整的紫微斗數 json 命盤，"
-        "接著依照命盤撰寫未來十年重點在事業與財運的命理解讀，"
-        "輸出格式必須嚴格為 <Natal Chart> + <Interpretation> 兩個區塊。\n"
-        "</Question>\n"
+        # "<Question>\n"
+        # "請根據上述出生資料，先自行排出完整的紫微斗數 json 命盤，"
+        # "接著依照命盤撰寫未來十年重點在事業與財運的命理解讀，"
+        # "輸出格式必須嚴格為 <Natal Chart> + <Interpretation> 兩個區塊。\n"
+        # "</Question>\n"
     )
 
     # ----- 2. Output：命盤 JSON -----
@@ -173,19 +173,16 @@ def build_prompt(sample):
     # ----- 3. Output：文字解讀 -----
     # 從 sample 中抓 interpret / 解說 等欄位
     interpretation = (
-        sample.get("interpretation")
-        or sample.get("解說")
-        or sample.get("content")
-        or ""
+        sample.get("解讀")
     )
 
     output_block = (
         "<Natal Chart>\n"
         f"{chart_str}\n"
-        "</Natal Chart>\n"
-        "<Interpretation>\n"
+        # "</Natal Chart>\n"
+        # "<Interpretation>\n"
         f"{interpretation}\n"
-        "</Interpretation>\n"
+        # "</Interpretation>\n"
     )
 
     # ✅ 最終：system_intro + input + output
@@ -371,21 +368,8 @@ def main():
     # Preprocess dataset: tokenize + mask input labels
     # --------------------------------------------------------------------
     def preprocess_function(example):
-        """
-        Converts a single example from raw JSON to tokenized format:
-          - input_ids
-          - attention_mask
-          - labels  (with input parts masked as -100)
-        """
         text = build_prompt(example)
-
-        # Find the input part (</INPUT> .. </INPUT>) to mask labels
-        try:
-            split_idx = text.index("</INPUT>")
-            prefix_text = text[: split_idx + len("</INPUT>")]
-        except ValueError:
-            prefix_text = ""
-
+        
         # Tokenization
         tokenized = tokenizer(
             text,
@@ -393,25 +377,67 @@ def main():
             truncation=True,
             padding="max_length",
         )
-
-        labels = tokenized["input_ids"].copy()
-
-        # Calculate prefix length
-        if prefix_text:
-            prefix_ids = tokenizer(
-                prefix_text,
-                add_special_tokens=True,
+        
+        input_ids = tokenized["input_ids"]
+        attention_mask = tokenized["attention_mask"]
+        
+        # 建立 labels，預設全為 -100 (忽略計算 loss)
+        labels = [-100] * len(input_ids)
+        
+        # -------------------------------------------------------
+        # 修正 1: 準確找到 User Input 與 Model Output 的邊界
+        # 你的 Prompt 結構是: ... </Question>\n<Natal Chart> ...
+        # 我們希望模型從 "<Natal Chart>" 開始預測
+        # -------------------------------------------------------
+        
+        # 為了避免 tokenizer 對空白符號處理的差異，建議先 tokenize 整個 text，
+        # 再 tokenize "Prompt 部分"，計算長度來做 mask
+        
+        # 你的 prompt 結束點應該是在 <Question> 區塊結束之後
+        # 讓我們定義一個明確的分隔符，根據你的 build_prompt，
+        # output 是從 <Natal Chart> 開始
+        split_token = "<Natal Chart>"
+        
+        try:
+            # 找到分隔符在純文字中的位置
+            split_idx = text.index(split_token)
+            # 取得 Prompt 部分的文字 (包含 System, Input, Question)
+            prompt_text = text[:split_idx]
+            
+            # 將 Prompt 部分轉為 token id
+            prompt_ids = tokenizer(
+                prompt_text, 
+                add_special_tokens=True, # 確保開頭處理一致
+                truncation=True, 
+                max_length=args.max_seq_length
             )["input_ids"]
-            prefix_len = min(len(prefix_ids), args.max_seq_length)
-        else:
-            prefix_len = 0
+            
+            prompt_len = len(prompt_ids)
+            
+        except ValueError:
+            # 如果找不到分隔符，這筆資料可能有問題，全部 mask 掉或設為 0
+            prompt_len = 0
+            print(f"Warning: split token '{split_token}' not found in text.")
 
-        # Mask input part in labels
-        for i in range(prefix_len):
-            if i < len(labels):
+        # -------------------------------------------------------
+        # 修正 2: 填入 Label 並處理 Padding
+        # -------------------------------------------------------
+        for i in range(len(input_ids)):
+            # 條件 A: 如果是 Padding (attention_mask == 0)，保持 -100
+            if attention_mask[i] == 0:
                 labels[i] = -100
+            # 條件 B: 如果在 Prompt 範圍內，保持 -100
+            elif i < prompt_len:
+                labels[i] = -100
+            # 條件 C: 剩下的就是真正的 Output，填入 input_id 讓模型學習
+            else:
+                labels[i] = input_ids[i]
 
+        # 確保 truncation 沒有切掉所有的 labels
+        # 如果 prompt_len >= max_seq_length，這筆資料就廢了
+        
         tokenized["labels"] = labels
+        # print(labels)
         return tokenized
 
     print("Tokenizing and preparing dataset (this may take a while)...")
