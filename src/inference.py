@@ -126,29 +126,17 @@ def parse_args():
 # ====== 載模型 ======
 def load_model_and_tokenizer(
     base_model_name: str,
-    peft_model_path: str,
+    peft_model_path: str = None,  # 參數保留但不使用，避免改 main()
     use_4bit: bool = True,
     device_map: str = "auto",
 ):
     """
-    和 fine-tuning 時的流程對齊：
-    - 用 LoRA 裡的 peft_config
-    - 4bit 時跑 prepare_model_for_kbit_training
-    - get_peft_model 掛 LoRA
-    - tokenizer 加 <END_ANSWER> + resize_token_embeddings
-    - 載 adapter 時丟掉 embed_tokens / lm_head 的權重（避免 vocab size mismatch）
+    只載入 base model 做推論，不掛載任何 LoRA adapter。
     """
-    print(f"[Model] Loading PEFT config from: {peft_model_path}")
-    peft_config = PeftConfig.from_pretrained(peft_model_path)
-    print("  base_model_name_or_path from peft_config:", peft_config.base_model_name_or_path)
-    print("  target_modules:", peft_config.target_modules)
-
-    # 這裡可以視情況選擇要不要強制一致（不一致就直接噴錯提醒）
-    if peft_config.base_model_name_or_path != base_model_name:
-        print(
-            f"[WARN] base_model_name != peft_config.base_model_name_or_path "
-            f"({base_model_name} vs {peft_config.base_model_name_or_path})"
-        )
+    print(f"[Model] Loading base model only (no LoRA).")
+    print(f"  base_model_name = {base_model_name}")
+    if peft_model_path is not None:
+        print(f"  (peft_model_path is ignored in this mode: {peft_model_path})")
 
     # 1) 載 base model
     if use_4bit:
@@ -159,99 +147,43 @@ def load_model_and_tokenizer(
             bnb_4bit_compute_dtype=torch.float16,
             bnb_4bit_use_double_quant=False,
         )
-        base_model = AutoModelForCausalLM.from_pretrained(
+        model = AutoModelForCausalLM.from_pretrained(
             base_model_name,
             quantization_config=bnb_config,
             device_map=device_map,
             trust_remote_code=True,
         )
-        print("[Model] Running prepare_model_for_kbit_training (same as SFT)...")
-        base_model = prepare_model_for_kbit_training(base_model)
+        # 嚴格來說純推論不一定要這行；留著也沒關係
+        print("[Model] (Optional) prepare_model_for_kbit_training for 4bit model...")
+        model = prepare_model_for_kbit_training(model)
     else:
         print("[Model] Loading base model in full precision...")
-        base_model = AutoModelForCausalLM.from_pretrained(
+        model = AutoModelForCausalLM.from_pretrained(
             base_model_name,
             torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
             device_map=device_map,
             trust_remote_code=True,
         )
 
-    # 2) 載 tokenizer，對齊 SFT 的 special tokens 設定
+    # 2) 載 tokenizer
     print("[Tokenizer] Loading tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(base_model_name, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = "left"  # 你原本 eval 就是 left
+    tokenizer.padding_side = "left"
 
-    # ★ 和 fine-tuning+eval.py 一樣：加上 <END_ANSWER> 並 resize embedding
+    # 如果你有在 SFT 時「真的」加過 special token（例如 <END_ANSWER>），
+    # 這裡再打開註解即可；現在先單純用原始 vocab。
     # SPECIAL_TOKENS = ["<END_ANSWER>"]
     # num_added = tokenizer.add_tokens(SPECIAL_TOKENS)
     # if num_added > 0:
     #     print(f"[Tokenizer] Added {num_added} special tokens: {SPECIAL_TOKENS}")
     #     print(f"[Model] Resizing token embeddings to {len(tokenizer)}")
-    #     base_model.resize_token_embeddings(len(tokenizer))
+    #     model.resize_token_embeddings(len(tokenizer))
 
-    # 3) 和訓練端一致：用 get_peft_model 掛 LoRA 結構
-    print(f"[Model] Building PEFT wrapper (get_peft_model) from config at: {peft_model_path}")
-    # ! Tmp change
-    model = get_peft_model(base_model, peft_config)
-    
-    # 4) 手動載入 adapter 權重，並丟掉 embed_tokens / lm_head 相關 key
-    #    （避免 vocab size mismatch，並跟你原本的 "Skip loading base embedding/lm_head" 一致）
-    print(f"[Model] Loading adapter weights from: {peft_model_path}")
-    safetensors_path = os.path.join(peft_model_path, "adapter_model.safetensors")
-    bin_path = os.path.join(peft_model_path, "adapter_model.bin")
-
-    if os.path.exists(safetensors_path):
-        print(f"[Model] Found safetensors adapter: {safetensors_path}")
-        adapter_state = load_file(safetensors_path)
-    elif os.path.exists(bin_path):
-        print(f"[Model] Found bin adapter: {bin_path}")
-        adapter_state = torch.load(bin_path, map_location="cpu")
-    else:
-        raise FileNotFoundError(
-            f"No adapter_model.safetensors or adapter_model.bin found in {peft_model_path}"
-        )
-
-    print(f"[Model] Adapter state_dict params: {len(adapter_state)}")
-
-    # 和你原本 eval script 的 conflict_keys 邏輯一致，但寫成 prefix 判斷
-    conflict_prefixes = (
-        "base_model.model.model.embed_tokens.weight",
-        "base_model.model.lm_head.weight",
-    )
-    filtered_state = {}
-    skipped = []
-
-    for k, v in adapter_state.items():
-        if any(k.startswith(p) for p in conflict_prefixes):
-            print(
-                f"[Model] Skip loading base embedding/lm_head from adapter: "
-                f"{k}, shape={tuple(v.shape)}"
-            )
-            skipped.append(k)
-            continue
-        filtered_state[k] = v
-
-    print(f"[Model] Skipped {len(skipped)} conflict params (embed_tokens / lm_head).")
-    print(f"[Model] Remaining adapter params: {len(filtered_state)}")
-
-    # 5) 把剩下的 LoRA 權重塞進剛剛用 get_peft_model 建好的 model
-
-    # load_result = model.load_state_dict(filtered_state, strict=False)
-
-    print(model.print_trainable_parameters())
-    # print(
-    #     f"[Model] Adapter loaded with strict=False. "
-    #     f"Missing keys: {len(load_result.missing_keys)}, "
-    #     f"Unexpected keys: {len(load_result.unexpected_keys)}"
-    # )
-    # if len(load_result.missing_keys) < 50 and len(load_result.unexpected_keys) == 0:
-    #     print("[Model] LoRA structure is mostly aligned with training setup.")
-
-    
     model.eval()
     return model, tokenizer
+
 
 
 # def _try_load_adapter_file(peft_model_path):
